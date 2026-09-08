@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Eco-Surfer: Ocean Cleanup</title>
+  <style>
+    :root {
+      --bg-ocean: #031525;
+      --reef-wall: #00828a;
+      --reef-glow: #00fff2;
+      --sand: #f4d06f;
+      --accent: #ff0077;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: var(--bg-ocean);
+      color: #fff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    header {
+      text-align: center;
+      margin-top: 8px;
+      margin-bottom: 6px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--reef-glow);
+      text-shadow: 0 0 10px rgba(0, 255, 242, 0.6);
+    }
+
+    #scoreboard {
+      display: flex;
+      gap: 20px;
+      font-size: 0.95rem;
+      font-weight: bold;
+      background: rgba(0, 40, 60, 0.7);
+      padding: 6px 16px;
+      border-radius: 20px;
+      border: 1px solid rgba(0, 255, 242, 0.3);
+      margin-bottom: 6px;
+    }
+
+    #canvas-container {
+      position: relative;
+      border: 3px solid var(--reef-wall);
+      border-radius: 12px;
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.35);
+      background: #01111d;
+    }
+
+    canvas {
+      display: block;
+      background: radial-gradient(circle at 50% 50%, #03253b 0%, #01101b 100%);
+      border-radius: 8px;
+    }
+
+    /* Virtual D-pad for mobile/touch screens */
+    #dpad {
+      display: none;
+      grid-template-columns: repeat(3, 56px);
+      grid-template-rows: repeat(3, 56px);
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    @media (max-width: 768px) {
+      #dpad {
+        display: grid;
+      }
+    }
+
+    .dpad-btn {
+      background: rgba(0, 130, 138, 0.3);
+      border: 2px solid var(--reef-glow);
+      border-radius: 12px;
+      color: #fff;
+      font-size: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+    }
+
+    .dpad-btn:active {
+      background: var(--reef-glow);
+      color: #000;
+    }
+
+    .up { grid-column: 2; grid-row: 1; }
+    .left { grid-column: 1; grid-row: 2; }
+    .down { grid-column: 2; grid-row: 2; }
+    .right { grid-column: 3; grid-row: 2; }
+
+    .help {
+      font-size: 0.8rem;
+      color: #79a8c0;
+      margin-top: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>🏄 Eco-Surfer: Ocean Cleanup 🌊</h1>
+  </header>
+
+  <div id="scoreboard">
+    <span>PLASTIC CLEANED: <span id="score" style="color: #4ef037;">0</span></span>
+    <span>HIGH: <span id="high-score">0</span></span>
+    <span>LIVES: <span id="lives" style="color: #ff3366;">❤️❤️❤️</span></span>
+    <span>LEVEL: <span id="level" style="color: #ffcc00;">1</span></span>
+  </div>
+
+  <div id="canvas-container">
+    <canvas id="gameCanvas" width="456" height="504"></canvas>
+  </div>
+
+  <!-- Mobile D-Pad -->
+  <div id="dpad">
+    <button class="dpad-btn up" id="btn-up">⬆️</button>
+    <button class="dpad-btn left" id="btn-left">⬅️</button>
+    <button class="dpad-btn down" id="btn-down">⬇️</button>
+    <button class="dpad-btn right" id="btn-right">➡️</button>
+  </div>
+
+  <div class="help">
+    Desktop: <b>Arrow Keys</b> or <b>WASD</b> &bull; Clean plastic bottles, avoid sharks! Grab Solar Buoys ☀️ to scare sharks away!
+  </div>
+
+<script>
+/* =========================================================================
+   1. AUDIO SYNTHESIS SYSTEM (Web Audio API)
+   ========================================================================= */
+class SoundFx {
+  constructor() {
+    this.ctx = null;
+    this.muted = false;
+  }
+  init() {
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+  playTone(freq, type, duration, vol = 0.1) {
+    if (this.muted || !this.ctx) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+      gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + duration);
+    } catch (e) {}
+  }
+  eatPlastic() {
+    this.playTone(550 + Math.random() * 150, 'triangle', 0.08, 0.08);
+  }
+  powerPellet() {
+    [320, 440, 580, 720].forEach((f, i) => {
+      setTimeout(() => this.playTone(f, 'sine', 0.18, 0.12), i * 50);
+    });
+  }
+  catchShark() {
+    [400, 600, 800, 1000].forEach((f, i) => {
+      setTimeout(() => this.playTone(f, 'triangle', 0.15, 0.15), i * 40);
+    });
+  }
+  hurt() {
+    this.playTone(130, 'sawtooth', 0.35, 0.2);
+  }
+}
+const sfx = new SoundFx();
+
+/* =========================================================================
+   2. MAZE LAYOUT
+   0: Empty, 1: Coral Reef Wall, 2: Plastic Bottle, 3: Solar Eco-Buoy (Power), 4: Shark Gate
+   ========================================================================= */
+const TILE = 24;
+const COLS = 19;
+const ROWS = 21;
+
+const INITIAL_MAP = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,3,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,3,1],
+  [1,2,1,1,2,1,1,1,2,1,2,1,1,1,2,1,1,2,1],
+  [1,2,1,1,2,1,1,1,2,1,2,1,1,1,2,1,1,2,1],
+  [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,2,1,2,1,1,1,1,1,2,1,2,1,1,2,1],
+  [1,2,2,2,2,1,2,2,2,1,2,2,2,1,2,2,2,2,1],
+  [1,1,1,1,2,1,1,1,0,1,0,1,1,1,2,1,1,1,1],
+  [0,0,0,1,2,1,0,0,0,0,0,0,0,1,2,1,0,0,0],
+  [1,1,1,1,2,1,0,1,1,4,1,1,0,1,2,1,1,1,1],
+  [0,0,0,0,2,0,0,1,0,0,0,1,0,0,2,0,0,0,0],
+  [1,1,1,1,2,1,0,1,1,1,1,1,0,1,2,1,1,1,1],
+  [0,0,0,1,2,1,0,0,0,0,0,0,0,1,2,1,0,0,0],
+  [1,1,1,1,2,1,0,1,1,1,1,1,0,1,2,1,1,1,1],
+  [1,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,2,1,1,1,2,1,2,1,1,1,2,1,1,2,1],
+  [1,3,2,1,2,2,2,2,2,0,2,2,2,2,2,1,2,3,1],
+  [1,1,2,1,2,1,2,1,1,1,1,1,2,1,2,1,2,1,1],
+  [1,2,2,2,2,1,2,2,2,1,2,2,2,1,2,2,2,2,1],
+  [1,2,1,1,1,1,1,1,2,1,2,1,1,1,1,1,1,2,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+
+let grid = [];
+let totalPlastic = 0;
+let remainingPlastic = 0;
+
+function resetGrid() {
+  grid = JSON.parse(JSON.stringify(INITIAL_MAP));
+  totalPlastic = 0;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (grid[r][c] === 2 || grid[r][c] === 3) totalPlastic++;
+    }
+  }
+  remainingPlastic = totalPlastic;
+}
+
+/* =========================================================================
+   3. PARTICLES SYSTEM (Bubbles & Spray)
+   ========================================================================= */
+const particles = [];
+function addBubble(x, y, color = 'rgba(255,255,255,0.7)', speed = 0.5) {
+  if (particles.length > 50) particles.shift();
+  particles.push({
+    x, y,
+    vx: (Math.random() - 0.5) * speed,
+    vy: -Math.random() * speed - 0.2,
+    size: 2 + Math.random() * 3,
+    alpha: 0.8,
+    color
+  });
+}
+function updateAndDrawParticles(ctx) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.alpha -= 0.02;
+    if (p.alpha <= 0) {
+      particles.splice(i, 1);
+      continue;
+    }
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* =========================================================================
+   4. SURFER (PLAYER)
+   ========================================================================= */
+class Surfer {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.x = 9;
+    this.y = 16;
+    this.dirX = 0;
+    this.dirY = 0;
+    this.nextDirX = 0;
+    this.nextDirY = 0;
+    this.speed = 0.11;
+    this.wakeTimer = 0;
+  }
+  update() {
+    // Attempt turn into queued direction
+    if (this.nextDirX !== 0 || this.nextDirY !== 0) {
+      if (this.canMove(this.nextDirX, this.nextDirY)) {
+        this.dirX = this.nextDirX;
+        this.dirY = this.nextDirY;
+      }
+    }
+
+    if (this.canMove(this.dirX, this.dirY)) {
+      this.x += this.dirX * this.speed;
+      this.y += this.dirY * this.speed;
+
+      // Particle wake behind surfboard
+      this.wakeTimer++;
+      if (this.wakeTimer % 3 === 0 && (this.dirX !== 0 || this.dirY !== 0)) {
+        addBubble(
+          (this.x + 0.5) * TILE - this.dirX * 8,
+          (this.y + 0.5) * TILE - this.dirY * 8,
+          'rgba(180, 240, 255, 0.7)',
+          0.8
+        );
+      }
+    } else {
+      // Snap to tile center when colliding
+      this.x = Math.round(this.x);
+      this.y = Math.round(this.y);
+    }
+
+    // Tunnel wrap-around
+    if (this.x < -0.5) this.x = COLS - 0.5;
+    if (this.x > COLS - 0.5) this.x = -0.5;
+
+    // Collect plastics & powerups
+    const cx = Math.round(this.x);
+    const cy = Math.round(this.y);
+    if (grid[cy] && (grid[cy][cx] === 2 || grid[cy][cx] === 3)) {
+      const isPower = grid[cy][cx] === 3;
+      grid[cy][cx] = 0;
+      remainingPlastic--;
+      
+      if (isPower) {
+        score += 50;
+        sfx.powerPellet();
+        triggerFrightenedMode();
+      } else {
+        score += 10;
+        sfx.eatPlastic();
+      }
+      updateHUD();
+    }
+  }
+
+  canMove(dx, dy) {
+    if (dx === 0 && dy === 0) return false;
+    const targetX = this.x + dx * this.speed;
+    const targetY = this.y + dy * this.speed;
+
+    // Check corners based on movement
+    const corners = [
+      { x: targetX + 0.15, y: targetY + 0.15 },
+      { x: targetX + 0.85, y: targetY + 0.15 },
+      { x: targetX + 0.15, y: targetY + 0.85 },
+      { x: targetX + 0.85, y: targetY + 0.85 },
+    ];
+
+    for (const c of corners) {
+      const tx = Math.floor(c.x);
+      const ty = Math.floor(c.y);
+      if (tx < 0 || tx >= COLS) continue; // Tunnel opening allowed
+      if (ty < 0 || ty >= ROWS) return false;
+      const tile = grid[ty][tx];
+      if (tile === 1 || tile === 4) return false; // Wall or Shark gate
+    }
+    return true;
+  }
+
+  draw(ctx) {
+    const px = (this.x + 0.5) * TILE;
+    const py = (this.y + 0.5) * TILE;
+
+    ctx.save();
+    ctx.translate(px, py);
+
+    let angle = 0;
+    if (this.dirX === 1) angle = 0;
+    else if (this.dirX === -1) angle = Math.PI;
+    else if (this.dirY === 1) angle = Math.PI / 2;
+    else if (this.dirY === -1) angle = -Math.PI / 2;
+    ctx.rotate(angle);
+
+    // Surfboard shadow
+    ctx.fillStyle = 'rgba(0, 10, 20, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(-2, 3, 15, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Surfboard Body
+    ctx.fillStyle = '#ffb703';
+    ctx.beginPath();
+    ctx.moveTo(15, 0);
+    ctx.quadraticCurveTo(0, -7, -13, -5);
+    ctx.quadraticCurveTo(-15, 0, -13, 5);
+    ctx.quadraticCurveTo(0, 7, 15, 0);
+    ctx.fill();
+
+    // Board Racing Stripe
+    ctx.strokeStyle = '#fb8500';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-12, 0);
+    ctx.lineTo(13, 0);
+    ctx.stroke();
+
+    // Surfer Figure (Top-down view)
+    // Feet on board
+    ctx.fillStyle = '#fceade';
+    ctx.fillRect(-6, -5, 4, 3);
+    ctx.fillRect(2, 2, 4, 3);
+
+    // Torso / Wetsuit
+    ctx.fillStyle = '#023047';
+    ctx.beginPath();
+    ctx.ellipse(-1, 0, 5, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Head / Sunhat
+    ctx.fillStyle = '#fceade';
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+/* =========================================================================
+   5. SHARKS (GHOSTS)
+   ========================================================================= */
+const SHARK_COLORS = ['#e63946', '#fb8500', '#2a9d8f', '#9d4edd'];
+
+class Shark {
+  constructor(color, homeX, homeY) {
+    this.color = color;
+    this.homeX = homeX;
+    this.homeY = homeY;
+    this.reset();
+  }
+  reset() {
+    this.x = this.homeX;
+    this.y = this.homeY;
+    this.dirX = 0;
+    this.dirY = -1;
+    this.speed = 0.085;
+    this.frightened = false;
+    this.eaten = false;
+  }
+  update(surfer) {
+    const isAtCenter = Math.abs(this.x - Math.round(this.x)) < 0.05 && 
+                       Math.abs(this.y - Math.round(this.y)) < 0.05;
+
+    if (isAtCenter) {
+      this.x = Math.round(this.x);
+      this.y = Math.round(this.y);
+
+      // Choose next path at intersections
+      const validMoves = this.getValidMoves();
+      if (validMoves.length > 0) {
+        if (this.eaten) {
+          // Returning home
+          this.chooseBestMove(validMoves, 9, 9);
+          if (this.x === 9 && this.y === 9) this.eaten = false;
+        } else if (this.frightened) {
+          // Random erratic escape movement
+          const rnd = validMoves[Math.floor(Math.random() * validMoves.length)];
+          this.dirX = rnd.x;
+          this.dirY = rnd.y;
+        } else {
+          // Hunt surfer
+          this.chooseBestMove(validMoves, surfer.x, surfer.y);
+        }
+      }
+    }
+
+    const currentSpeed = this.eaten ? this.speed * 2 : (this.frightened ? this.speed * 0.6 : this.speed);
+    this.x += this.dirX * currentSpeed;
+    this.y += this.dirY * currentSpeed;
+
+    // Tunnel wrap
+    if (this.x < -0.5) this.x = COLS - 0.5;
+    if (this.x > COLS - 0.5) this.x = -0.5;
+  }
+
+  getValidMoves() {
+    const moves = [
+      { x: 0, y: -1 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+      { x: 1, y: 0 }
+    ];
+    return moves.filter(m => {
+      // Don't reverse immediately unless no other path
+      if (m.x === -this.dirX && m.y === -this.dirY) return false;
+      const nx = Math.floor(this.x + m.x);
+      const ny = Math.floor(this.y + m.y);
+      if (nx < 0 || nx >= COLS) return true; // tunnel OK
+      if (ny < 0 || ny >= ROWS) return false;
+      const tile = grid[ny][nx];
+      // When inside house or returning, shark can pass the shark gate (tile 4)
+      if (tile === 4) return this.eaten || (this.y >= 9 && this.y <= 11);
+      return tile !== 1;
+    });
+  }
+
+  chooseBestMove(validMoves, targetX, targetY) {
+    let bestMove = validMoves[0];
+    let minDistance = Infinity;
+
+    for (const move of validMoves) {
+      const nextX = this.x + move.x;
+      const nextY = this.y + move.y;
+      const dist = Math.hypot(nextX - targetX, nextY - targetY);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestMove = move;
+      }
+    }
+    this.dirX = bestMove.x;
+    this.dirY = bestMove.y;
+  }
+
+  draw(ctx, frame) {
+    const px = (this.x + 0.5) * TILE;
+    const py = (this.y + 0.5) * TILE;
+
+    ctx.save();
+    ctx.translate(px, py);
+
+    let angle = 0;
+    if (this.dirX === 1) angle = 0;
+    else if (this.dirX === -1) angle = Math.PI;
+    else if (this.dirY === 1) angle = Math.PI / 2;
+    else if (this.dirY === -1) angle = -Math.PI / 2;
+    ctx.rotate(angle);
+
+    const tailWiggle = Math.sin(frame * 0.3) * 3;
+
+    if (this.eaten) {
+      // Just eyes running back to center
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(3, -3, 3, 0, Math.PI * 2);
+      ctx.arc(3, 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0044ff';
+      ctx.beginPath();
+      ctx.arc(4, -3, 1.5, 0, Math.PI * 2);
+      ctx.arc(4, 3, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const bodyColor = this.frightened ? '#48cae4' : this.color;
+
+      // Shark Body
+      ctx.fillStyle = bodyColor;
+      ctx.beginPath();
+      ctx.moveTo(12, 0);
+      ctx.quadraticCurveTo(0, -8, -10, -5 + tailWiggle);
+      // Tail Fin
+      ctx.lineTo(-14, -9 + tailWiggle);
+      ctx.lineTo(-11, 0 + tailWiggle);
+      ctx.lineTo(-14, 9 + tailWiggle);
+      ctx.quadraticCurveTo(0, 8, 12, 0);
+      ctx.fill();
+
+      // Dorsal Fin
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.beginPath();
+      ctx.moveTo(2, 0);
+      ctx.lineTo(-3, -7);
+      ctx.lineTo(-4, 0);
+      ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = this.frightened ? '#fff' : '#111';
+      ctx.beginPath();
+      ctx.arc(7, -3, 2, 0, Math.PI * 2);
+      ctx.arc(7, 3, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/* =========================================================================
+   6. GAME STATE & MAIN LOOP
+   ========================================================================= */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let score = 0;
+let highScore = localStorage.getItem('eco_surfer_highscore') || 0;
+let lives = 3;
+let level = 1;
+let gameState = 'START'; // START, PLAYING, WON, GAMEOVER
+let frightTimer = null;
+let frameCount = 0;
+
+const surfer = new Surfer();
+const sharks = [
+  new Shark(SHARK_COLORS[0], 9, 8),
+  new Shark(SHARK_COLORS[1], 8, 10),
+  new Shark(SHARK_COLORS[2], 9, 10),
+  new Shark(SHARK_COLORS[3], 10, 10)
+];
+
+function triggerFrightenedMode() {
+  sharks.forEach(s => { if (!s.eaten) s.frightened = true; });
+  if (frightTimer) clearTimeout(frightTimer);
+  frightTimer = setTimeout(() => {
+    sharks.forEach(s => s.frightened = false);
+  }, 7500);
+}
+
+function updateHUD() {
+  document.getElementById('score').innerText = score;
+  document.getElementById('high-score').innerText = highScore;
+  document.getElementById('lives').innerText = '❤️'.repeat(Math.max(0, lives));
+  document.getElementById('level').innerText = level;
+}
+
+function restartLevel(fullReset = false) {
+  if (fullReset) {
+    lives = 3;
+    score = 0;
+    level = 1;
+  }
+  resetGrid();
+  surfer.reset();
+  sharks.forEach(s => s.reset());
+  updateHUD();
+}
+
+/* =========================================================================
+   7. RENDERING (OCEAN, PLASTIC, POWERUPS)
+   ========================================================================= */
+function drawBoard() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const tile = grid[r][c];
+      const x = c * TILE;
+      const y = r * TILE;
+
+      if (tile === 1) {
+        // Coral Reef Barrier Wall
+        ctx.fillStyle = '#023047';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.strokeStyle = '#00fff2';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 2, y + 2, TILE - 4, TILE - 4);
+      } else if (tile === 4) {
+        // Shark Gate Bar
+        ctx.strokeStyle = '#ff70a6';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x, y + TILE / 2);
+        ctx.lineTo(x + TILE, y + TILE / 2);
+        ctx.stroke();
+      } else if (tile === 2) {
+        // Plastic Water Bottle
+        ctx.save();
+        ctx.translate(x + TILE / 2, y + TILE / 2);
+        // Cap
+        ctx.fillStyle = '#0077b6';
+        ctx.fillRect(-2, -7, 4, 3);
+        // Translucent Bottle Body
+        ctx.fillStyle = 'rgba(180, 240, 255, 0.85)';
+        ctx.fillRect(-3.5, -4, 7, 10);
+        ctx.restore();
+      } else if (tile === 3) {
+        // Solar Clean-Up Buoy (Power Pellet)
+        const pulse = Math.sin(frameCount * 0.1) * 2;
+        ctx.save();
+        ctx.translate(x + TILE / 2, y + TILE / 2);
+        ctx.fillStyle = '#ffb703';
+        ctx.beginPath();
+        ctx.arc(0, 0, 6 + pulse, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+}
+
+function updateGame() {
+  frameCount++;
+
+  if (gameState === 'PLAYING') {
+    surfer.update();
+
+    sharks.forEach(shark => {
+      shark.update(surfer);
+
+      // Collision detection with Surfer
+      const dist = Math.hypot(shark.x - surfer.x, shark.y - surfer.y);
+      if (dist < 0.65) {
+        if (shark.frightened && !shark.eaten) {
+          shark.eaten = true;
+          shark.frightened = false;
+          score += 200;
+          sfx.catchShark();
+          updateHUD();
+        } else if (!shark.eaten) {
+          // Caught by shark!
+          sfx.hurt();
+          lives--;
+          updateHUD();
+          if (lives <= 0) {
+            gameState = 'GAMEOVER';
+            if (score > highScore) {
+              highScore = score;
+              localStorage.setItem('eco_surfer_highscore', highScore);
+            }
+          } else {
+            surfer.reset();
+            sharks.forEach(s => s.reset());
+          }
+        }
+      }
+    });
+
+    // Check Victory (all plastic picked up)
+    if (remainingPlastic <= 0) {
+      gameState = 'WON';
+      level++;
+      sfx.catchShark();
+    }
+  }
+
+  // Draw Everything
+  drawBoard();
+  updateAndDrawParticles(ctx);
+  surfer.draw(ctx);
+  sharks.forEach(shark => shark.draw(ctx, frameCount));
+
+  // Overlays
+  if (gameState === 'START') {
+    drawBanner('ECO-SURFER', 'Press SPACE or TAP to Surf & Clean!');
+  } else if (gameState === 'GAMEOVER') {
+    drawBanner('WIPEOUT!', 'Game Over. Press SPACE or TAP to Restart');
+  } else if (gameState === 'WON') {
+    drawBanner('REEF SAVED!', 'Press SPACE or TAP for Next Level');
+  }
+
+  requestAnimationFrame(updateGame);
+}
+
+function drawBanner(title, subtitle) {
+  ctx.fillStyle = 'rgba(1, 17, 29, 0.85)';
+  ctx.fillRect(20, canvas.height / 2 - 50, canvas.width - 40, 100);
+  ctx.strokeStyle = '#00fff2';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, canvas.height / 2 - 50, canvas.width - 40, 100);
+
+  ctx.fillStyle = '#ffea00';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 12);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(subtitle, canvas.width / 2, canvas.height / 2 + 22);
+}
+
+/* =========================================================================
+   8. USER CONTROLS & INPUT
+   ========================================================================= */
+function handleInput(dir) {
+  sfx.init();
+  if (gameState !== 'PLAYING') {
+    if (gameState === 'GAMEOVER') restartLevel(true);
+    if (gameState === 'WON') restartLevel(false);
+    gameState = 'PLAYING';
+    return;
+  }
+  switch (dir) {
+    case 'UP': surfer.nextDirX = 0; surfer.nextDirY = -1; break;
+    case 'DOWN': surfer.nextDirX = 0; surfer.nextDirY = 1; break;
+    case 'LEFT': surfer.nextDirX = -1; surfer.nextDirY = 0; break;
+    case 'RIGHT': surfer.nextDirX = 1; surfer.nextDirY = 0; break;
+  }
+}
+
+window.addEventListener('keydown', e => {
+  if (['ArrowUp', 'KeyW'].includes(e.code)) handleInput('UP');
+  else if (['ArrowDown', 'KeyS'].includes(e.code)) handleInput('DOWN');
+  else if (['ArrowLeft', 'KeyA'].includes(e.code)) handleInput('LEFT');
+  else if (['ArrowRight', 'KeyD'].includes(e.code)) handleInput('RIGHT');
+  else if (e.code === 'Space') handleInput('UP');
+});
+
+// Touch / Button Handlers
+document.getElementById('btn-up').addEventListener('pointerdown', () => handleInput('UP'));
+document.getElementById('btn-down').addEventListener('pointerdown', () => handleInput('DOWN'));
+document.getElementById('btn-left').addEventListener('pointerdown', () => handleInput('LEFT'));
+document.getElementById('btn-right').addEventListener('pointerdown', () => handleInput('RIGHT'));
+canvas.addEventListener('pointerdown', () => handleInput('UP'));
+
+// Initialize
+restartLevel(true);
+requestAnimationFrame(updateGame);
+</script>
+</body>
+</html>
