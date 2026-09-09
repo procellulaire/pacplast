@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Eco-Surfer: Ocean Cleanup</title>
   <style>
     :root {
@@ -21,6 +21,11 @@
       -webkit-user-select: none;
     }
 
+    html, body {
+      touch-action: manipulation;
+      overscroll-behavior: none;
+    }
+
     body {
       background-color: var(--bg-ocean);
       color: #fff;
@@ -31,6 +36,7 @@
       justify-content: center;
       min-height: 100vh;
       overflow-x: hidden;
+      padding: env(safe-area-inset-top) 8px env(safe-area-inset-bottom);
     }
 
     header {
@@ -49,7 +55,9 @@
 
     #scoreboard {
       display: flex;
-      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px 20px;
       font-size: 0.95rem;
       font-weight: bold;
       background: rgba(0, 40, 60, 0.7);
@@ -57,6 +65,7 @@
       border-radius: 20px;
       border: 1px solid rgba(0, 255, 242, 0.3);
       margin-bottom: 6px;
+      max-width: 100%;
     }
 
     #canvas-container {
@@ -65,28 +74,77 @@
       border-radius: 12px;
       box-shadow: 0 0 25px rgba(0, 240, 255, 0.35);
       background: #01111d;
+      width: min(96vw, 456px);
+      touch-action: none;
+    }
+
+    #canvas-container.shake {
+      animation: mega-shake 0.7s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+    }
+
+    @keyframes mega-shake {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      15% { transform: translate(-8px, 6px) scale(1.06); }
+      30% { transform: translate(9px, -7px) scale(0.96); }
+      45% { transform: translate(-7px, -5px) scale(1.05); }
+      60% { transform: translate(6px, 8px) scale(0.97); }
+      80% { transform: translate(-4px, 3px) scale(1.02); }
     }
 
     canvas {
       display: block;
       background: radial-gradient(circle at 50% 50%, #03253b 0%, #01101b 100%);
       border-radius: 8px;
+      width: 100%;
+      height: auto;
+      touch-action: none;
     }
 
     /* Virtual D-pad for mobile/touch screens */
     #dpad {
-      display: none;
-      grid-template-columns: repeat(3, 56px);
-      grid-template-rows: repeat(3, 56px);
+      display: grid;
+      grid-template-columns: repeat(3, 64px);
+      grid-template-rows: repeat(3, 64px);
       gap: 6px;
       margin-top: 10px;
     }
 
-    @media (max-width: 768px) {
-      #dpad {
-        display: grid;
-      }
+    @media (hover: hover) and (pointer: fine) {
+      #dpad { display: none; }
     }
+
+    #actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .action-btn {
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: bold;
+      padding: 12px 20px;
+      min-height: 48px;
+      border-radius: 24px;
+      border: 2px solid var(--reef-glow);
+      background: rgba(0, 130, 138, 0.35);
+      color: #fff;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+
+    .action-btn:active { background: var(--reef-glow); color: #000; }
+    .action-btn:disabled { opacity: 0.45; }
+
+    #btn-mega {
+      border-color: var(--accent);
+      background: rgba(255, 0, 119, 0.25);
+      box-shadow: 0 0 14px rgba(255, 0, 119, 0.5);
+    }
+
+    #btn-mega:active { background: var(--accent); color: #fff; }
 
     .dpad-btn {
       background: rgba(0, 130, 138, 0.3);
@@ -137,14 +195,21 @@
 
   <!-- Mobile D-Pad -->
   <div id="dpad">
-    <button class="dpad-btn up" id="btn-up">⬆️</button>
-    <button class="dpad-btn left" id="btn-left">⬅️</button>
-    <button class="dpad-btn down" id="btn-down">⬇️</button>
-    <button class="dpad-btn right" id="btn-right">➡️</button>
+    <button class="dpad-btn up" id="btn-up" aria-label="Move up">⬆️</button>
+    <button class="dpad-btn left" id="btn-left" aria-label="Move left">⬅️</button>
+    <button class="dpad-btn down" id="btn-down" aria-label="Move down">⬇️</button>
+    <button class="dpad-btn right" id="btn-right" aria-label="Move right">➡️</button>
+  </div>
+
+  <div id="actions">
+    <button class="action-btn" id="btn-hint">💡 HINT</button>
+    <button class="action-btn" id="btn-mega">🧠 MEGA-THINK</button>
   </div>
 
   <div class="help">
-    Desktop: <b>Arrow Keys</b> or <b>WASD</b> &bull; Clean plastic bottles, avoid sharks! Grab Solar Buoys ☀️ to scare sharks away!
+    Desktop: <b>Arrow Keys</b> or <b>WASD</b> &bull; Mobile: <b>swipe the maze</b> or use the D-pad<br />
+    Clean plastic bottles, avoid sharks! Grab Solar Buoys ☀️ to scare sharks away!<br />
+    <b>HINT</b> lights up the path to the closest plastic &bull; <b>MEGA-THINK</b> auto-surfs the rest of the level for you.
   </div>
 
 <script>
@@ -293,6 +358,7 @@ class Surfer {
     this.nextDirY = 0;
     this.speed = 0.11;
     this.wakeTimer = 0;
+    this.autoPath = null;
   }
   update() {
     // Attempt turn into queued direction
@@ -327,14 +393,55 @@ class Surfer {
     if (this.x < -0.5) this.x = COLS - 0.5;
     if (this.x > COLS - 0.5) this.x = -0.5;
 
-    // Collect plastics & powerups
+    this.collect();
+  }
+
+  // Auto-pilot movement used by MEGA-THINK: follows a solved path at high speed
+  autoStep(speed) {
+    if (!this.autoPath || this.autoPath.length === 0) {
+      this.x = Math.round(this.x);
+      this.y = Math.round(this.y);
+      this.autoPath = findPathToNearestPlastic(Math.round(this.x), Math.round(this.y));
+      if (!this.autoPath || this.autoPath.length === 0) return;
+    }
+
+    const target = this.autoPath[0];
+    const dx = target.x - this.x;
+    const dy = target.y - this.y;
+
+    if (dx !== 0) this.dirX = Math.sign(dx);
+    if (dy !== 0) this.dirY = Math.sign(dy);
+    if (dx !== 0) this.dirY = 0;
+    else if (dy !== 0) this.dirX = 0;
+
+    const dist = Math.abs(dx) + Math.abs(dy);
+    if (dist <= speed) {
+      this.x = target.x;
+      this.y = target.y;
+      this.autoPath.shift();
+    } else {
+      this.x += this.dirX * speed;
+      this.y += this.dirY * speed;
+    }
+
+    addBubble(
+      (this.x + 0.5) * TILE - this.dirX * 8,
+      (this.y + 0.5) * TILE - this.dirY * 8,
+      'rgba(255, 220, 120, 0.8)',
+      1.2
+    );
+
+    this.collect();
+  }
+
+  collect() {
     const cx = Math.round(this.x);
     const cy = Math.round(this.y);
     if (grid[cy] && (grid[cy][cx] === 2 || grid[cy][cx] === 3)) {
       const isPower = grid[cy][cx] === 3;
       grid[cy][cx] = 0;
       remainingPlastic--;
-      
+
       if (isPower) {
         score += 50;
         sfx.powerPellet();
@@ -601,6 +708,130 @@ let gameState = 'START'; // START, PLAYING, WON, GAMEOVER
 let frightTimer = null;
 let frameCount = 0;
 
+/* Hint & Mega-Think state */
+let hintPath = [];
+let hintTimer = 0;         // frames left showing the hint path
+let megaThinkActive = false;
+const AUTO_SPEED = 0.32;   // tiles per frame while auto-solving
+const confetti = [];
+
+/* Breadth-first search across walkable tiles (walls & shark gate blocked) */
+function isWalkable(c, r) {
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return false;
+  const tile = grid[r][c];
+  return tile !== 1 && tile !== 4;
+}
+
+function findPathToNearestPlastic(startC, startR) {
+  if (!isWalkable(startC, startR)) return [];
+  const key = (c, r) => r * COLS + c;
+  const cameFrom = new Map();
+  const visited = new Set([key(startC, startR)]);
+  const queue = [{ c: startC, r: startR }];
+  const dirs = [{ c: 0, r: -1 }, { c: 0, r: 1 }, { c: -1, r: 0 }, { c: 1, r: 0 }];
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    const tile = grid[cur.r][cur.c];
+    if ((tile === 2 || tile === 3) && !(cur.c === startC && cur.r === startR)) {
+      // Rebuild path from target back to start
+      const path = [];
+      let node = cur;
+      while (node) {
+        path.unshift({ x: node.c, y: node.r });
+        node = cameFrom.get(key(node.c, node.r));
+      }
+      path.shift(); // drop the starting tile
+      return path;
+    }
+    for (const d of dirs) {
+      const nc = cur.c + d.c;
+      const nr = cur.r + d.r;
+      if (!isWalkable(nc, nr) || visited.has(key(nc, nr))) continue;
+      visited.add(key(nc, nr));
+      cameFrom.set(key(nc, nr), cur);
+      queue.push({ c: nc, r: nr });
+    }
+  }
+  return [];
+}
+
+function showHint() {
+  sfx.init();
+  if (gameState !== 'PLAYING') return;
+  hintPath = findPathToNearestPlastic(Math.round(surfer.x), Math.round(surfer.y));
+  hintTimer = 300; // ~5 seconds at 60fps
+  sfx.playTone(880, 'sine', 0.15, 0.08);
+}
+
+function spawnConfetti(count = 140) {
+  const colors = ['#ff0077', '#ffea00', '#4ef037', '#00fff2', '#ffb703', '#9d4edd'];
+  for (let i = 0; i < count; i++) {
+    confetti.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * canvas.width * 0.5,
+      y: canvas.height / 2 + (Math.random() - 0.5) * 40,
+      vx: (Math.random() - 0.5) * 9,
+      vy: -Math.random() * 9 - 2,
+      size: 3 + Math.random() * 5,
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.4,
+      life: 90 + Math.random() * 90,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    });
+  }
+}
+
+function updateAndDrawConfetti(context) {
+  for (let i = confetti.length - 1; i >= 0; i--) {
+    const p = confetti[i];
+    p.vy += 0.22;
+    p.vx *= 0.99;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rot += p.vr;
+    p.life--;
+    if (p.life <= 0 || p.y > canvas.height + 20) {
+      confetti.splice(i, 1);
+      continue;
+    }
+    context.save();
+    context.globalAlpha = Math.min(1, p.life / 40);
+    context.translate(p.x, p.y);
+    context.rotate(p.rot);
+    context.fillStyle = p.color;
+    context.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 1.6);
+    context.restore();
+  }
+}
+
+function startMegaThink() {
+  sfx.init();
+  if (gameState !== 'PLAYING' || megaThinkActive) return;
+  megaThinkActive = true;
+  document.getElementById('btn-mega').disabled = true;
+
+  const container = document.getElementById('canvas-container');
+  container.classList.remove('shake');
+  void container.offsetWidth; // restart the animation
+  container.classList.add('shake');
+  setTimeout(() => container.classList.remove('shake'), 800);
+
+  spawnConfetti();
+  sfx.powerPellet();
+
+  hintPath = [];
+  hintTimer = 0;
+  surfer.x = Math.round(surfer.x);
+  surfer.y = Math.round(surfer.y);
+  surfer.autoPath = null;
+}
+
+function stopMegaThink() {
+  megaThinkActive = false;
+  surfer.autoPath = null;
+  document.getElementById('btn-mega').disabled = false;
+}
+
 const surfer = new Surfer();
 const sharks = [
   new Shark(SHARK_COLORS[0], 9, 8),
@@ -633,6 +864,9 @@ function restartLevel(fullReset = false) {
   resetGrid();
   surfer.reset();
   sharks.forEach(s => s.reset());
+  hintPath = [];
+  hintTimer = 0;
+  stopMegaThink();
   updateHUD();
 }
 
@@ -697,7 +931,16 @@ function updateGame() {
   frameCount++;
 
   if (gameState === 'PLAYING') {
-    surfer.update();
+    if (megaThinkActive) {
+      surfer.autoStep(AUTO_SPEED);
+    } else {
+      surfer.update();
+    }
+
+    if (hintTimer > 0) {
+      hintTimer--;
+      if (hintTimer === 0) hintPath = [];
+    }
 
     sharks.forEach(shark => {
       shark.update(surfer);
@@ -711,13 +954,14 @@ function updateGame() {
           score += 200;
           sfx.catchShark();
           updateHUD();
-        } else if (!shark.eaten) {
+        } else if (!shark.eaten && !megaThinkActive) {
           // Caught by shark!
           sfx.hurt();
           lives--;
           updateHUD();
           if (lives <= 0) {
             gameState = 'GAMEOVER';
+            hintPath = [];
             if (score > highScore) {
               highScore = score;
               localStorage.setItem('eco_surfer_highscore', highScore);
@@ -734,15 +978,20 @@ function updateGame() {
     if (remainingPlastic <= 0) {
       gameState = 'WON';
       level++;
+      hintPath = [];
+      if (megaThinkActive) stopMegaThink();
+      spawnConfetti(180);
       sfx.catchShark();
     }
   }
 
   // Draw Everything
   drawBoard();
+  drawHintPath();
   updateAndDrawParticles(ctx);
   surfer.draw(ctx);
   sharks.forEach(shark => shark.draw(ctx, frameCount));
+  updateAndDrawConfetti(ctx);
 
   // Overlays
   if (gameState === 'START') {
@@ -754,6 +1003,36 @@ function updateGame() {
   }
 
   requestAnimationFrame(updateGame);
+}
+
+function drawHintPath() {
+  const path = megaThinkActive ? surfer.autoPath : hintPath;
+  if (!path || path.length === 0) return;
+
+  const pulse = 0.5 + Math.sin(frameCount * 0.15) * 0.25;
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.strokeStyle = megaThinkActive ? '#ff0077' : '#ffea00';
+  ctx.shadowColor = ctx.strokeStyle;
+  ctx.shadowBlur = 12;
+  ctx.lineWidth = 6;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo((surfer.x + 0.5) * TILE, (surfer.y + 0.5) * TILE);
+  for (const p of path) {
+    ctx.lineTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE);
+  }
+  ctx.stroke();
+
+  // Highlight the goal tile
+  const goal = path[path.length - 1];
+  ctx.globalAlpha = Math.min(1, pulse + 0.35);
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.beginPath();
+  ctx.arc((goal.x + 0.5) * TILE, (goal.y + 0.5) * TILE, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawBanner(title, subtitle) {
@@ -784,6 +1063,7 @@ function handleInput(dir) {
     gameState = 'PLAYING';
     return;
   }
+  if (megaThinkActive) return; // auto-pilot ignores manual steering
   switch (dir) {
     case 'UP': surfer.nextDirX = 0; surfer.nextDirY = -1; break;
     case 'DOWN': surfer.nextDirX = 0; surfer.nextDirY = 1; break;
@@ -797,15 +1077,62 @@ window.addEventListener('keydown', e => {
   else if (['ArrowDown', 'KeyS'].includes(e.code)) handleInput('DOWN');
   else if (['ArrowLeft', 'KeyA'].includes(e.code)) handleInput('LEFT');
   else if (['ArrowRight', 'KeyD'].includes(e.code)) handleInput('RIGHT');
-  else if (e.code === 'Space') handleInput('UP');
+  else if (e.code === 'Space') { e.preventDefault(); handleInput('START'); }
+  else if (e.code === 'KeyH') showHint();
+  else if (e.code === 'KeyM') startMegaThink();
 });
 
 // Touch / Button Handlers
-document.getElementById('btn-up').addEventListener('pointerdown', () => handleInput('UP'));
-document.getElementById('btn-down').addEventListener('pointerdown', () => handleInput('DOWN'));
-document.getElementById('btn-left').addEventListener('pointerdown', () => handleInput('LEFT'));
-document.getElementById('btn-right').addEventListener('pointerdown', () => handleInput('RIGHT'));
-canvas.addEventListener('pointerdown', () => handleInput('UP'));
+function bindHold(id, dir) {
+  const btn = document.getElementById(id);
+  const press = e => { e.preventDefault(); handleInput(dir); };
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+}
+bindHold('btn-up', 'UP');
+bindHold('btn-down', 'DOWN');
+bindHold('btn-left', 'LEFT');
+bindHold('btn-right', 'RIGHT');
+
+document.getElementById('btn-hint').addEventListener('click', showHint);
+document.getElementById('btn-mega').addEventListener('click', startMegaThink);
+
+/* Swipe anywhere on the maze to steer (mobile-first control) */
+const SWIPE_THRESHOLD = 18; // px
+let touchStart = null;
+
+function swipeDirection(dx, dy) {
+  if (Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) return null;
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'RIGHT' : 'LEFT';
+  return dy > 0 ? 'DOWN' : 'UP';
+}
+
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  sfx.init();
+  touchStart = { x: e.clientX, y: e.clientY, moved: false };
+  if (gameState !== 'PLAYING') handleInput('START');
+});
+
+canvas.addEventListener('pointermove', e => {
+  if (!touchStart || touchStart.moved) return;
+  const dir = swipeDirection(e.clientX - touchStart.x, e.clientY - touchStart.y);
+  if (dir) {
+    touchStart.moved = true;
+    handleInput(dir);
+  }
+});
+
+canvas.addEventListener('pointerup', e => {
+  if (!touchStart) return;
+  if (!touchStart.moved) {
+    const dir = swipeDirection(e.clientX - touchStart.x, e.clientY - touchStart.y);
+    if (dir) handleInput(dir);
+  }
+  touchStart = null;
+});
+
+canvas.addEventListener('pointercancel', () => { touchStart = null; });
 
 // Initialize
 restartLevel(true);
